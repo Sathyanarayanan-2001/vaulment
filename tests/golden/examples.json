@@ -1,0 +1,7 @@
+[
+  { "name": "Financial-year boundary", "kind": "period", "input": ["31/03/2027", "01/04/2027"], "expected": ["FY 2026-27", "FY 2027-28"], "format": "^FY \\d{4}-\\d{2}$" },
+  { "name": "ISO week 53", "kind": "week", "input": ["31/12/2026", "03/01/2027", "04/01/2027"], "expected": ["CW53", "CW53", "CW01"], "format": "^CW\\d{2}$" },
+  { "name": "Exact rupee total", "kind": "total", "input": ["0.10", "0.20", "1,23,456.78", "76,543.22"], "expected": ["2,00,000.30"], "format": "^(\\d{1,2},)*\\d{1,3}\\.\\d{2}$" },
+  { "name": "Merge settles the same way", "kind": "merge", "input": { "a": { "x": { "u": 5, "t": "apple" }, "y": { "u": 9, "t": "kept" } }, "b": { "x": { "t": "zebra", "u": 5 }, "y": { "d": 1, "u": 8 } } }, "expected": ["{\"x\":{\"t\":\"zebra\",\"u\":5},\"y\":{\"t\":\"kept\",\"u\":9}}"], "format": "^\\{" },
+  { "name": "CSV import with preamble", "kind": "import", "input": "Report made up\n\nTitle,Number,Amount\nSample one,00123456789012,1000.50\nSample one,00123456789012,\nNo amount,,12.345\n", "expected": ["ready:1", "duplicate:1", "error:1", "00123456789012", "100050"], "format": "." }
+]

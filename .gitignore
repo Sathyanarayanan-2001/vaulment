@@ -1,0 +1,42 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+*.log
+
+# Vault data must never reach the repository
+vaulment-save-*
+vaulment-backup-*
+vaulment-export-*
+vaulment-recovery-key*
+*.vbak
+*.bak
+*.backup
+*.json.gz
+*.gz
+*.dump
+*.sqlite
+*.csv
+*.tsv
+*.xlsx
+*.xls
+backup/
+backups/
+exports/
+saves/
+OneDrive*/
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local tooling
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+lighthouse-report.*

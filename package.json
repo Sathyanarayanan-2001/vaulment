@@ -1,0 +1,27 @@
+{
+  "name": "vaulment",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A private, encrypted, offline-first vault for personal documents, passwords and cards.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "serve": "node scripts/serve.mjs",
+    "test": "node --test \"tests/unit/*.test.mjs\"",
+    "golden": "node scripts/golden.mjs",
+    "e2e": "node --test --test-concurrency=1 \"tests/e2e/*.test.mjs\"",
+    "privacy": "node scripts/check-privacy.mjs",
+    "perf": "node scripts/perf.mjs",
+    "lighthouse": "node scripts/lighthouse.mjs",
+    "verify": "node scripts/verify.mjs"
+  },
+  "devDependencies": {
+    "axe-core": "4.11.4",
+    "chrome-launcher": "1.2.2",
+    "esbuild": "0.28.2",
+    "lighthouse": "13.6.0",
+    "playwright": "1.63.0"
+  }
+}

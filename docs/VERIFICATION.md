@@ -36,4 +36,8 @@ Five fixed examples in `tests/golden/examples.json`, each scored for correct, co
 
 ## Not verified
 
-See [KNOWN-LIMITS.md](KNOWN-LIMITS.md). In short: real OneDrive, real Android, the native folder picker, and GitHub Actions itself, which cannot run until the code is pushed.
+See [KNOWN-LIMITS.md](KNOWN-LIMITS.md). In short: real OneDrive, real Android and the native folder picker.
+
+## GitHub Actions
+
+The same checks passed on GitHub before merging pull request #1: 199 unit tests, 87 browser tests, golden set 15/15, and Lighthouse first load of 968 ms at worst. The first run failed one test on timing, which is recorded in [QUALITY.md](QUALITY.md). Deployment to Pages reported success.

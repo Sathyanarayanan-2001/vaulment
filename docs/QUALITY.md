@@ -13,7 +13,7 @@ Each stage moved on only when its exit criteria passed. Counts are the numbers a
 | 3 Storage and sync | WebCrypto vault, IndexedDB, save files, sync engine | 168 unit | Wrong-vault warning found and fixed before exit | Pass |
 | 4 Pages and styles | All tabs, charts, quick start, offline, manifest, CSP | 73 browser tests; defects below fixed | None | Pass |
 | 5 Import and export | CSV preview, export, backups, round trips | Included in browser suite | None | Pass |
-| 6 Documents and CI | Repository files, Actions, this record | actionlint clean; privacy check | Actions cannot run until pushed | Pass with note |
+| 6 Documents and CI | Repository files, Actions, this record | actionlint clean; privacy check; first GitHub run 86/87, then 87/87 after one test fix | None | Pass |
 | 7 Second round | Independent review, first-time user, regression, zip | See [VERIFICATION.md](VERIFICATION.md) | Items in [KNOWN-LIMITS.md](KNOWN-LIMITS.md) | Pass with note |
 
 ## DMAIC
@@ -95,6 +95,7 @@ Each stage moved on only when its exit criteria passed. Counts are the numbers a
 | Independent re-check | Lock during a reload handed the key back | A lock outranks any load in progress |
 | Independent re-check | One damaged file stalled a restore; Bring back missed removed files and purged trash | Per-file handling; both restored |
 | Independent re-check | Stale recovery key could restore an old password; phone had no way to accept a changed password; unconfirmed recovery key was forgotten after a closed tab; Erase missed unsynced edits after reload | Merged keyring; Open a backup on the unlock screen; Home warning; flag survives reload |
+| GitHub Actions | Quick start test checked the tour before it had opened on the slower runner; the app was fine | Test waits for each step |
 | Usability test | Home search looked dead; "save file" and "backup" named one thing twice; "Send save file" sent nothing; dead-end message on a different vault | Live results; one word, backup; "Make a backup"; next step named |
 
 ## FMEA

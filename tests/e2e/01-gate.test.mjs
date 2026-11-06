@@ -41,14 +41,15 @@ test('closing the tab before confirming the recovery key leaves a warning on Hom
 test('quick start: appears on first visit, steps 1 to 4, then does not return; reopens from Guide', async () => {
   const { ctx, page, problems } = await fresh();
   await newVault(page, b.url);
-  for (const n of [1, 2, 3]) { assert.ok(await page.getByText(`step ${n} of 4`).isVisible()); await page.getByRole('button', { name: 'Next' }).click(); }
-  await page.getByRole('button', { name: 'Back' }).click(); assert.ok(await page.getByText('step 3 of 4').isVisible());
+  // The tour opens after the first page has drawn, so each step is waited for, not assumed.
+  for (const n of [1, 2, 3]) { await page.getByText(`step ${n} of 4`).waitFor(); await page.getByRole('button', { name: 'Next' }).click(); }
+  await page.getByRole('button', { name: 'Back' }).click(); await page.getByText('step 3 of 4').waitFor();
   await page.getByRole('button', { name: 'Next' }).click();
   await page.getByRole('button', { name: 'Finish' }).click();
   await page.reload(); await unlock(page);
   assert.equal(await page.locator('dialog[open]').count(), 0);
   await goto(page, '#/guide'); await page.getByRole('button', { name: 'Show quick start' }).click();
-  assert.ok(await page.getByText('step 1 of 4').isVisible());
+  await page.getByText('step 1 of 4').waitFor();
   await page.keyboard.press('Escape'); assert.equal(await page.locator('dialog').count(), 0);
   assert.deepEqual(problems, []); await ctx.close();
 });

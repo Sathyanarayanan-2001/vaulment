@@ -1,0 +1,45 @@
+{
+  "plain": {
+    "unlockDecryptBefore": 156.8,
+    "unlockDecryptAfter": 140.6,
+    "unlockFull": 456.5,
+    "listDrawBefore": 279.3,
+    "listDrawAfter": 6.3,
+    "blobCheckBefore": 118.8,
+    "blobCheckAfter": 1.2,
+    "fileLookupBefore": 133.1,
+    "fileLookupAfter": 0.2,
+    "searchKeystroke": 0.8,
+    "sortAll": 1.5,
+    "dashboard": 31.9,
+    "writeSave": 39.6,
+    "saveFileKB": 93,
+    "readSave": 16.9,
+    "mergeAllChanged": 63.3,
+    "canonicalOne": 18.4
+  },
+  "slow": {
+    "unlockDecryptBefore": 580.6,
+    "unlockDecryptAfter": 498.4,
+    "unlockFull": 810.1,
+    "listDrawBefore": 1363.3,
+    "listDrawAfter": 22.3,
+    "blobCheckBefore": 613.2,
+    "blobCheckAfter": 3.3,
+    "fileLookupBefore": 638.2,
+    "fileLookupAfter": 2.1,
+    "searchKeystroke": 7.8,
+    "sortAll": 10,
+    "dashboard": 138.4,
+    "writeSave": 230.8,
+    "saveFileKB": 93,
+    "readSave": 80.9,
+    "mergeAllChanged": 302.8,
+    "canonicalOne": 98.7
+  },
+  "loads": [
+    1175,
+    1138,
+    1131
+  ]
+}

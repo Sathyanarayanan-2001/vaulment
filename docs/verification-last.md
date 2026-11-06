@@ -2,9 +2,9 @@
 |---|---|---:|---:|
 | Build | pass |  |  |
 | Privacy check | pass |  |  |
-| Function round 1: unit tests in Node | pass | 192 | 192 |
+| Function round 1: unit tests in Node | pass | 199 | 199 |
 | Golden set | pass |  |  |
-| Function round 2: real browser through the UI | pass | 69 | 69 |
+| Function round 2: real browser through the UI | pass | 72 | 72 |
 | Appearance round 1: measured layout, targets, contrast, axe | pass | 15 | 15 |
 | Lighthouse, mobile profile | pass |  |  |
 

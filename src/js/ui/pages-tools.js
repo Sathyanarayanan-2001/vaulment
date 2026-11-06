@@ -72,7 +72,7 @@ export function syncPage() {
     if (!file) return;
     try {
       const r = await s.importBundle(await fileBytes(file));
-      toast(`Merged ${r.changed} change(s) and ${r.files} file(s).`);
+      toast(`Merged ${r.changed} change(s) and ${r.files} file(s).${r.damaged ? ` ${r.damaged} damaged file(s) were left out.` : ''}`, r.damaged ? 'error' : 'ok');
       draw();
     } catch (e) {
       toast(`Could not merge that file. ${e.message}`, 'error');
@@ -160,12 +160,12 @@ export function transferPage() {
       h('button', { class: 'btn', type: 'button', id: 'restore-go', onclick: async () => {
         const [file] = await pickFile('.gz,application/gzip,application/octet-stream');
         if (!file) return;
-        try { const r = await app.sync.importBundle(await fileBytes(file)); toast(`Merged ${r.changed} change(s) and ${r.files} file(s).`); } catch (e) { toast(`Could not merge that file. ${e.message}`, 'error'); }
+        try { const r = await app.sync.importBundle(await fileBytes(file)); toast(`Merged ${r.changed} change(s) and ${r.files} file(s).${r.damaged ? ` ${r.damaged} damaged file(s) were left out.` : ''}`, r.damaged ? 'error' : 'ok'); } catch (e) { toast(`Could not merge that file. ${e.message}`, 'error'); }
       } }, icon('upload'), 'Merge a backup'),
       h('button', { class: 'btn', type: 'button', id: 'copies-go', onclick: async () => {
         const [file] = await pickFile('.gz,application/gzip,application/octet-stream');
         if (!file) return;
-        try { const r = await app.sync.restoreCopies(await fileBytes(file)); toast(`Brought back ${r.items} item(s) and ${r.files} file(s) as copies.`); } catch (e) { toast(`Could not read that file. ${e.message}`, 'error'); }
+        try { const r = await app.sync.restoreCopies(await fileBytes(file)); toast(`Brought back ${r.items} item(s) and ${r.files} file(s).${r.failed ? ` ${r.failed} could not be restored.` : ''}`, r.failed ? 'error' : 'ok'); } catch (e) { toast(`Could not read that file. ${e.message}`, 'error'); }
       } }, icon('sync'), 'Bring back old items'))),
     h('section', { class: 'card' },
       h('h2', null, 'Plain CSV export'),
@@ -267,7 +267,7 @@ async function eraseDevice() {
   if (!pw) return;
   if (!(await confirmDialog({ title: 'Last check', body: 'Without a save file or another device, this data cannot be recovered.', action: 'Erase this device', danger: true }))) return;
   await app.sync.flush();
-  if (app.sync.dirty && !(await confirmDialog({ title: 'Some changes are not saved elsewhere', body: 'Recent changes have not reached a sync folder, so erasing now loses them. Make a backup first, unless you are sure.', action: 'Erase anyway', danger: true }))) return;
+  if ((app.sync.dirty || prefs.get('unsynced', false)) && !(await confirmDialog({ title: 'Some changes are not saved elsewhere', body: 'Recent changes have not reached a sync folder, so erasing now loses them. Make a backup first, unless you are sure.', action: 'Erase anyway', danger: true }))) return;
   app.vault.db.close();
   indexedDB.deleteDatabase(DB_NAME);
   location.hash = '';

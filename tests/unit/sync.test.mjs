@@ -324,8 +324,10 @@ test('laptop lost and password forgotten: a save file plus the recovery key is e
 test('locked device accepts a password changed elsewhere, proven by the newest save', async () => {
   const dir = new FakeDir();
   const { a, b, sa } = await devicePair();
+  await b.putItem(item());
   const dbB = b.db; b.lock();
   await sa.connect(dir);
+  await new Promise((r) => setTimeout(r, 2));
   await a.changePassword(PW, 'changed-on-device-a'); await sa.write();
   const v = new Vault(dbB);
   await assert.rejects(v.unlock('changed-on-device-a'));
@@ -334,6 +336,79 @@ test('locked device accepts a password changed elsewhere, proven by the newest s
   assert.equal(await v.unlockFromEnvelope(found.env, 'wrong-password-x'), false);
   assert.equal(await v.unlockFromEnvelope(found.env, 'changed-on-device-a'), true);
   v.lock(); await new Vault(dbB).unlock('changed-on-device-a');
+});
+test('an old save cannot bring an old password back', async () => {
+  const { a, sa } = await devicePair();
+  await a.putItem(item());
+  const oldEnv = await readEnvelope(await sa.exportBundle());
+  await new Promise((r) => setTimeout(r, 2));
+  await a.changePassword(PW, 'the-current-password');
+  const v = new Vault(a.db);
+  assert.equal(await v.unlockFromEnvelope(oldEnv, PW), false);
+  assert.equal(v.unlocked, false);
+  await v.unlock('the-current-password');
+});
+test('a forged save with its own key and any password cannot replace the keyring', async () => {
+  const { a } = await devicePair();
+  await a.putItem(item());
+  const before = canonicalJson(await a.db.get('kv', 'keyring'));
+  const attacker = new Vault(memoryBackend());
+  const made = await createKeyring('mistyped-password-x', Date.now() + 1e6, ITER);
+  await attacker.adopt(made.keyring, 'mistyped-password-x');
+  const env = await readEnvelope(await packSave({ dek: attacker.dek, keyring: made.keyring, recs: {}, device: 'x', session: 'y', nowMs: 1 }));
+  env.vaultId = a.keyring.vaultId; // The name matches; the key cannot open what is stored here.
+  const v = new Vault(a.db);
+  assert.equal(await v.unlockFromEnvelope(env, 'mistyped-password-x'), false);
+  assert.equal(canonicalJson(await a.db.get('kv', 'keyring')), before);
+});
+test('a stale prepared recovery key cannot undo a password change that arrived meanwhile', async () => {
+  const { a, b, sa, sb } = await devicePair();
+  const dir = new FakeDir();
+  await sa.connect(dir); await sb.connect(dir);
+  const prepared = await b.prepareRecovery(PW);
+  await new Promise((r) => setTimeout(r, 2));
+  await a.changePassword(PW, 'arrived-meanwhile');
+  await sa.write(); await sb.pull();
+  await b.applyKeyring(prepared.keyring);
+  assert.equal(await b.checkPassword('arrived-meanwhile'), true);
+  assert.equal(canonicalJson(b.keyring.rc), canonicalJson(prepared.keyring.rc));
+});
+test('a lock during a save still writes the full snapshot, never an empty vault', async () => {
+  const dir = new FakeDir();
+  const { a, b, sa, sb } = await devicePair();
+  await sa.connect(dir); await sb.connect(dir);
+  const it = await a.putItem(item({ title: 'Must survive' }));
+  await a.addAttachment(it.id, 'x.pdf', 'application/pdf', encodeText('x'));
+  const blobDir = dir.dirs.get('blobs');
+  const orig = blobDir.getFileHandle.bind(blobDir);
+  blobDir.getFileHandle = async (...args) => { a.lock(); return orig(...args); };
+  await sa.write();
+  blobDir.getFileHandle = orig;
+  await sb.pull();
+  assert.equal(b.get(it.id)?.title, 'Must survive');
+});
+test('a lock during reload does not hand the key back', async () => {
+  const { a } = await devicePair();
+  await a.putItem(item());
+  const entries = a.db.entries;
+  a.db.entries = async (s) => { a.lock(); return entries(s); };
+  await a.reload();
+  a.db.entries = entries;
+  assert.equal(a.unlocked, false); assert.equal(a.recs.size, 0);
+});
+test('one damaged file in a backup does not cost the others', async () => {
+  const { a, sa } = await devicePair();
+  const it = await a.putItem(item());
+  const bad = await a.addAttachment(it.id, 'bad.pdf', 'application/pdf', encodeText('bad'));
+  const good = await a.addAttachment(it.id, 'good.pdf', 'application/pdf', encodeText('good'));
+  const env = await readEnvelope(await sa.exportBundle());
+  env.blobs[bad.id].ct = env.blobs[bad.id].ct.replace(/^.{4}/, 'AAAA');
+  const bytes = await gzip(encodeText(JSON.stringify(env)));
+  const c = new Vault(memoryBackend()); await c.adoptEnvelope(env, PW);
+  const sc = new SyncEngine({ vault: c, device: 'devicecc', session: 'sesscc', timers: fakeTimers(), retry: fastRetry });
+  const r = await sc.importBundle(bytes);
+  assert.equal(r.damaged, 1); assert.equal(r.files, 1);
+  assert.equal(decodeText(await c.readAttachment(good.id)), 'good');
 });
 test('nothing marks the vault unlocked until its records are loaded', async () => {
   const { a } = await devicePair();
@@ -382,12 +457,31 @@ test('bring back old items: a deleted item and an old version return as copies; 
   await a.purge(gone.id);
   await a.putItem({ ...edited, title: 'New text' });
   const r = await sa.restoreCopies(backup);
-  assert.deepEqual(r, { items: 2, files: 1 });
+  assert.deepEqual(r, { items: 2, files: 1, failed: 0 });
   assert.deepEqual(items(a), ['Deleted later (restored)', 'Never changed', 'New text', 'Original text (restored)']);
   const copy = a.items().find((i) => i.title === 'Deleted later (restored)');
   assert.equal(decodeText(await a.readAttachment(a.attachmentsOf(copy.id)[0].id)), 'old file');
   assert.equal(a.get(gone.id), undefined);
-  assert.deepEqual(await sa.restoreCopies(backup), { items: 2, files: 1 }, 'a second run adds copies rather than failing');
+  assert.deepEqual(await sa.restoreCopies(backup), { items: 2, files: 1, failed: 0 }, 'a second run adds copies rather than failing');
+});
+test('bring back: a removed file returns to its item; purged trash returns; a deleted custom category falls back', async () => {
+  const { a, sa } = await devicePair();
+  await a.setCustomCategories([{ id: 'u_tempcategory1', label: 'Temporary' }]);
+  const kept = await a.putItem(item({ title: 'Kept item' }));
+  const file = await a.addAttachment(kept.id, 'removed.pdf', 'application/pdf', encodeText('removed file'));
+  const trashed = await a.putItem(item({ title: 'In trash then purged', trash: 5 }));
+  const custom = await a.putItem(item({ title: 'In custom category', c: 'u_tempcategory1' }));
+  const backup = await sa.exportBundle();
+  await a.removeAttachment(file.id);
+  await a.purge(trashed.id);
+  await a.purge(custom.id);
+  await a.setCustomCategories([]);
+  const r = await sa.restoreCopies(backup);
+  assert.equal(r.failed, 0);
+  assert.equal(decodeText(await a.readAttachment(a.attachmentsOf(kept.id)[0].id)), 'removed file');
+  const copy = a.items().find((i) => i.title === 'In trash then purged (restored)');
+  assert.equal(copy.trash, undefined);
+  assert.equal(a.items().find((i) => i.title === 'In custom category (restored)').c, 'other');
 });
 test('manual bundle: full round trip into a new device, files included, counts match', async () => {
   const { a, sa } = await devicePair();

@@ -132,7 +132,7 @@ function touchIdle() {
 }
 
 async function lock() {
-  if (!app.vault.unlocked) return;
+  if (!app.vault.unlocked || app.holdLock) return;
   // A hung folder must not leave the vault open. The save stays queued for the next unlock.
   await Promise.race([app.sync.flush(), new Promise((r) => setTimeout(r, LOCK_FLUSH_LIMIT_MS))]);
   app.vault.lock();
@@ -265,7 +265,12 @@ async function start() {
     toast('This browser is blocking storage, so nothing will be kept after you close this tab.', 'error');
   }
   app.vault = new Vault(backend);
-  app.sync = new SyncEngine({ vault: app.vault, device: deviceId(), session: newId('s').slice(2, 10), onState: drawSyncChip });
+  app.sync = new SyncEngine({ vault: app.vault, device: deviceId(), session: newId('s').slice(2, 10), onState: (state, message) => {
+    // Survives a reload, so Erase can still warn about changes that never left this device.
+    if (state === 'saved') prefs.set('unsynced', false);
+    else if (app.sync?.dirty) prefs.set('unsynced', true);
+    drawSyncChip(state, message);
+  } });
   app.vault.onChange(() => { app.sync.markDirty(); softRefresh(); tabs?.postMessage('changed'); });
   // A second open tab holds its own copy in memory, so it reloads when this one saves.
   tabs?.addEventListener('message', async () => {

@@ -24,7 +24,7 @@ Each stage moved on only when its exit criteria passed. Counts are the numbers a
 
 **Analyse.** Root causes are below. Most serious defects shared one pattern: the design was checked for the normal path between two healthy devices, and the failures sat on recovery paths and on what a *locked* or *new* device can see.
 
-**Improve.** Twelve review findings and four usability problems were fixed, along with defects found by testing. Lists rendered in pages of 100, and lookups moved to maps and sets. Measured results are in PERFORMANCE.md.
+**Improve.** Findings from two independent review passes and four usability problems were fixed, along with defects found by testing. Lists rendered in pages of 100, and lookups moved to maps and sets. Measured results are in PERFORMANCE.md.
 
 **Control.** `npm run verify` reruns everything and writes its counts. CI runs the same checks on every push and pull request and blocks deployment on failure. The golden set must score 15/15. The privacy check fails on anything resembling real data.
 
@@ -89,6 +89,12 @@ Each stage moved on only when its exit criteria passed. Counts are the numbers a
 | Independent review | Recovery key applied before it was confirmed | Applied only after the tick; auto-lock held on that screen |
 | Independent review | Screen claimed an old recovery key stops working everywhere | Wording corrected; limit documented |
 | Independent review | CSV Id could overwrite settings; lock could wait on a hung folder; backup hid missing files | Fixed |
+| Independent re-check | Restore tried only the newest-named save | Every readable save is tried |
+| Independent re-check | A forged or old save could change the local keyring | Newer slot required, and the key must open stored data |
+| Independent re-check | Lock during a save could write an empty vault | Snapshot taken first, with the key |
+| Independent re-check | Lock during a reload handed the key back | A lock outranks any load in progress |
+| Independent re-check | One damaged file stalled a restore; Bring back missed removed files and purged trash | Per-file handling; both restored |
+| Independent re-check | Stale recovery key could restore an old password; phone had no way to accept a changed password; unconfirmed recovery key was forgotten after a closed tab; Erase missed unsynced edits after reload | Merged keyring; Open a backup on the unlock screen; Home warning; flag survives reload |
 | Usability test | Home search looked dead; "save file" and "backup" named one thing twice; "Send save file" sent nothing; dead-end message on a different vault | Live results; one word, backup; "Make a backup"; next step named |
 
 ## FMEA

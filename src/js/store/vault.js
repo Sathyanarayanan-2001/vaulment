@@ -32,6 +32,8 @@ export class Vault {
     this.recs = new Map();
     this.hay = new Map();
     this.attIndex = null;
+    this.lockCount = 0;
+    this.unreadable = 0;
     this.listeners = new Set();
   }
 
@@ -90,7 +92,15 @@ export class Vault {
     if (env.vaultId !== local?.vaultId || !c.isKeyringShape(env.keyring)) return false;
     const dek = await c.unlockWithPassword(env.keyring, password).catch(() => null);
     if (!dek) return false;
-    const payload = await openEnvelope(env, dek);
+    const payload = await openEnvelope(env, dek).catch(() => null);
+    if (!payload || !c.isKeyringShape(payload.keyring)) return false;
+    // An old save must not bring back an old password: its slot has to be newer than ours,
+    // and be the very slot that just opened it.
+    if (payload.keyring.pw.u <= local.pw.u || canonicalJson(payload.keyring.pw) !== canonicalJson(env.keyring.pw)) return false;
+    // A forged file can be wrapped with any password, so the key must open what is stored here.
+    // An empty device has nothing to check against, and nothing to lose.
+    const [first] = await this.db.entries('recs');
+    if (first && !(await c.decryptJson(dek, first[1].iv, first[1].ct, `rec:${first[0]}`).then(() => true, () => false))) return false;
     await this.install(mergeKeyrings(local, payload.keyring), dek);
     return true;
   }
@@ -132,9 +142,10 @@ export class Vault {
     return c.rewrapRecovery(this.keyring, dek, nextStamp(this.keyring.u, this.now()));
   }
 
+  /** Merged, because a pull may have brought a newer password while the key was on screen. */
   async applyKeyring(keyring) {
-    this.keyring = keyring;
-    await this.db.put('kv', 'keyring', keyring);
+    this.keyring = mergeKeyrings(this.keyring, keyring);
+    await this.db.put('kv', 'keyring', this.keyring);
     this.emit([]);
   }
 
@@ -151,6 +162,7 @@ export class Vault {
   /** Decrypt in fixed batches. WebCrypto works off the main thread, so a batch in parallel
    *  beats awaiting one record at a time, by about 10% at 5,000 items (docs/PERFORMANCE.md). */
   async loadAll(dek = this.dek) {
+    const started = this.lockCount;
     const rows = await this.db.entries('recs');
     const recs = new Map();
     let unreadable = 0;
@@ -162,6 +174,8 @@ export class Vault {
         else recs.set(batch[j][0], rec);
       });
     }
+    // A lock while this ran wins. Finishing anyway would hand the key back.
+    if (this.lockCount !== started) return;
     this.unreadable = unreadable;
     this.recs = recs;
     this.attIndex = null;
@@ -173,11 +187,13 @@ export class Vault {
 
   /** Reread what another tab saved. Does not emit, so two tabs cannot ping-pong. */
   async reload() {
+    if (!this.unlocked) return;
     this.keyring = (await this.db.get('kv', 'keyring')) ?? this.keyring;
     await this.loadAll();
   }
 
   lock() {
+    this.lockCount += 1;
     this.dek = null;
     this.recs = new Map();
     this.hay = new Map();

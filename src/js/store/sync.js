@@ -1,7 +1,7 @@
 import { packSave, parseSaveName, readEnvelope, openEnvelope, saveFileName, vaultTag } from './savefile.js';
 import { decryptBytes, fromBase64, newId, toBase64 } from '../crypto/vaultcrypto.js';
 import { canonicalJson } from '../core/canonical.js';
-import { LIMITS } from '../core/schema.js';
+import { CATEGORY_IDS, LIMITS, TEMPLATE_BY_ID } from '../core/schema.js';
 import { MS_PER_MINUTE, MS_PER_SECOND } from '../core/units.js';
 import { isTombstone } from '../core/merge.js';
 
@@ -167,11 +167,14 @@ export class SyncEngine {
   async writeOnce() {
     const nowMs = this.now();
     // One file per session: created once, then rewritten, so a session leaves one save behind.
+    // Taken together and first: a lock during the file copies below empties the live store,
+    // and a save made from that would tell every device the vault is empty.
     const { dek, keyring } = this.vault;
     if (!dek) return;
+    const recs = this.vault.snapshot();
     this.fileName ??= saveFileName(keyring.vaultId, this.device, this.session, nowMs);
     await this.pushBlobs();
-    const bytes = await packSave({ dek, keyring, recs: this.vault.snapshot(), device: this.device, session: this.session, nowMs });
+    const bytes = await packSave({ dek, keyring, recs, device: this.device, session: this.session, nowMs });
     await writeFileBytes(this.dir, this.fileName, bytes);
     this.seen.set(this.fileName, 'own');
     await this.prune();
@@ -312,46 +315,73 @@ export class SyncEngine {
     const result = await this.vault.mergeRemote(payload.recs ?? {});
     await this.vault.mergeKeyring(payload.keyring);
     let files = 0;
+    let damaged = 0;
     for (const [id, row] of Object.entries(env.blobs ?? {})) {
       if (!this.vault.get(id) || (await this.vault.hasBlob(id))) continue;
-      const stored = { iv: fromBase64(row.iv), ct: fromBase64(row.ct) };
-      await this.checkBlob(id, stored);
-      await this.vault.db.put('blobs', id, stored);
-      files += 1;
+      try {
+        const stored = { iv: fromBase64(row.iv), ct: fromBase64(row.ct) };
+        await this.checkBlob(id, stored);
+        await this.vault.db.put('blobs', id, stored);
+        files += 1;
+      } catch {
+        damaged += 1; // One bad file must not cost the rest of the backup.
+      }
     }
     if (result.changed.length > 0 || files > 0) this.markDirty();
-    return { changed: result.changed.length, rejected: result.rejected, files };
+    return { changed: result.changed.length, rejected: result.rejected, files, damaged };
   }
 
   /**
    * Bring back what a merge cannot: an item deleted since the backup, or a version that a
    * later edit replaced. Merging keeps the newest version, so those come back as new copies
    * beside whatever is there now, and nothing current is touched.
-   * @returns {{items:number, files:number}}
+   * Time O(n + a), using a map of files by parent item.
+   * @returns {{items:number, files:number, failed:number}}
    */
   async restoreCopies(bytes) {
     const env = await readEnvelope(bytes);
     if (env.vaultId !== this.vault.keyring.vaultId) throw new Error('This file belongs to a different vault. Open it on a clean device with Bring my vault to this device.');
     const { recs = {} } = await openEnvelope(env, this.vault.dek);
+    const filesOf = new Map();
+    for (const att of Object.values(recs)) {
+      if (att.k !== 'att') continue;
+      if (!filesOf.has(att.item)) filesOf.set(att.item, []);
+      filesOf.get(att.item).push(att);
+    }
+    const customIds = new Set(this.vault.customCategories().map((c) => c.id));
+    const addFile = async (att, itemId) => {
+      const row = env.blobs?.[att.id];
+      if (!row) return 0;
+      const plain = await decryptBytes(this.vault.dek, fromBase64(row.iv), fromBase64(row.ct), `blob:${att.id}`);
+      await this.vault.addAttachment(itemId, att.name, att.mime, plain);
+      return 1;
+    };
     let items = 0;
     let files = 0;
+    let failed = 0;
     const now = this.now();
     for (const old of Object.values(recs)) {
-      if (old.k !== 'item' || old.trash !== undefined) continue;
+      if (old.k !== 'item') continue;
       const current = this.vault.get(old.id);
-      if (current && canonicalJson({ ...current, u: 0, pwu: 0 }) === canonicalJson({ ...old, u: 0, pwu: 0 })) continue;
-      const id = newId('r');
-      await this.vault.putItem({ ...old, id, title: `${old.title} (restored)`.slice(0, LIMITS.title), cr: now });
-      items += 1;
-      for (const att of Object.values(recs)) {
-        const row = env.blobs?.[att.id];
-        if (att.k !== 'att' || att.item !== old.id || !row) continue;
-        const plain = await decryptBytes(this.vault.dek, fromBase64(row.iv), fromBase64(row.ct), `blob:${att.id}`);
-        await this.vault.addAttachment(id, att.name, att.mime, plain);
-        files += 1;
+      try {
+        if (current && canonicalJson({ ...current, u: 0, pwu: 0 }) === canonicalJson({ ...old, u: 0, pwu: 0 })) {
+          // The item stands, but a file removed since the backup goes back on it.
+          for (const att of filesOf.get(old.id) ?? []) if (!this.vault.get(att.id)) files += await addFile(att, old.id);
+          continue;
+        }
+        if (old.trash !== undefined && current) continue;
+        const { trash, ...rest } = old;
+        // A custom category deleted since the backup falls back to the type's own category.
+        const c = CATEGORY_IDS.has(rest.c) || customIds.has(rest.c) ? rest.c : TEMPLATE_BY_ID[rest.t]?.cat ?? 'other';
+        const id = newId('r');
+        await this.vault.putItem({ ...rest, id, c, title: `${old.title.slice(0, LIMITS.title - 11)} (restored)`, cr: now });
+        items += 1;
+        for (const att of filesOf.get(old.id) ?? []) files += await addFile(att, id);
+      } catch {
+        failed += 1;
       }
     }
-    return { items, files };
+    return { items, files, failed };
   }
 
   /** Every readable save in `dir`, by name, newest first; undelivered ones are passed over.

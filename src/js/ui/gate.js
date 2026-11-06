@@ -1,5 +1,5 @@
 import { h, icon, downloadBytes, fileBytes, pickFile, toast } from './dom.js';
-import { app } from './state.js';
+import { app, prefs } from './state.js';
 import { passwordBits, strengthLabel } from '../core/passwords.js';
 import { VaultError } from '../store/vault.js';
 import { readEnvelope } from '../store/savefile.js';
@@ -65,6 +65,7 @@ export function setupScreen(root, done) {
     if (problem) { err.textContent = problem; return; }
     const code = await app.vault.create(pw.input.value);
     await app.vault.loadAll();
+    prefs.set('recoveryPending', true); // Cleared by the tick. Home nags until then.
     recoveryScreen(root, code, () => done({ firstRun: true }));
   }) },
   pw.el, meter(pw.input), again.el, err, create);
@@ -102,6 +103,7 @@ export function recoveryScreen(root, code, confirm) {
     h('button', { class: 'btn btn-primary wide', type: 'button', onclick: async () => {
       if (!saved.checked) { err.textContent = 'Tick the box once your key is safe. Without it, a forgotten password means losing everything.'; return; }
       app.holdLock = false;
+      prefs.set('recoveryPending', false);
       await confirm();
     } }, 'Continue'),
   ));
@@ -126,6 +128,21 @@ export function unlockScreen(root, done) {
     h('h1', { tabindex: '-1' }, 'Unlock your vault'),
     form,
     h('button', { class: 'btn-link', type: 'button', onclick: () => recoverScreen(root, done) }, 'Forgot the password? Use your recovery key'),
+    // A phone with no folder has only this way to learn of a password changed elsewhere.
+    h('button', { class: 'btn-link', type: 'button', onclick: async () => {
+      if (!pw.input.value) { err.textContent = 'Type the new master password first, then pick the backup.'; return; }
+      const [file] = await pickFile('.gz,application/gzip,application/octet-stream');
+      if (!file) return;
+      try {
+        const bytes = await fileBytes(file);
+        if (await app.vault.unlockFromEnvelope(await readEnvelope(bytes), pw.input.value)) {
+          await app.sync.importBundle(bytes);
+          done({ firstRun: false });
+        } else err.textContent = 'That password does not open a newer copy of this vault from that file.';
+      } catch (e) {
+        err.textContent = `Could not read that file. ${e.message}`;
+      }
+    } }, 'Password changed on another device? Open a backup'),
   ));
   pw.input.focus();
 }
@@ -174,8 +191,7 @@ function recoverScreen(root, done) {
 function restoreScreen(root, done) {
   const status = h('p', { class: 'hint', 'aria-live': 'polite' });
   const err = errorLine();
-  let envelope = null;
-  let bytes = null;
+  let candidates = []; // Every readable save: the newest-named file can be a stale one.
   let dir = null;
   const pw = passwordField('restore-pw', 'Master password', 'current-password');
   const code = h('input', { id: 'restore-rk', type: 'text', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'characters' });
@@ -192,32 +208,31 @@ function restoreScreen(root, done) {
     err.textContent = '';
   } }, 'Forgot the password? Use your recovery key');
   const form = h('form', { novalidate: true, hidden: true, onsubmit: busy(open, 'Opening', async () => {
-    try {
-      if (useRecovery) {
-        const problem = newPasswordProblem(newPw.input.value, newPw2.input.value);
-        if (problem) { err.textContent = problem; return; }
-        await app.vault.adoptEnvelopeRecovery(envelope, code.value, newPw.input.value);
-      } else {
-        await app.vault.adoptEnvelope(envelope, pw.input.value);
-      }
-      if (bytes) await app.sync.importBundle(bytes);
-      done({ firstRun: false, dir });
-    } catch (e) {
-      err.textContent = e instanceof VaultError ? e.message : `Could not open that file. ${e.message}`;
+    if (useRecovery) {
+      const problem = newPasswordProblem(newPw.input.value, newPw2.input.value);
+      if (problem) { err.textContent = problem; return; }
     }
+    let last = null;
+    for (const { env, bytes } of candidates) {
+      try {
+        if (useRecovery) await app.vault.adoptEnvelopeRecovery(env, code.value, newPw.input.value);
+        else await app.vault.adoptEnvelope(env, pw.input.value);
+        await app.sync.importBundle(bytes);
+        done({ firstRun: false, dir });
+        return;
+      } catch (e) {
+        last = e;
+      }
+    }
+    err.textContent = last instanceof VaultError ? last.message : `Could not open that file. ${last?.message ?? ''}`;
   }) }, pw.el, recoveryFields, err, open, swap);
 
-  const accept = async (b, d = null) => {
-    try {
-      envelope = await readEnvelope(b);
-      bytes = b;
-      dir = d;
-      status.textContent = 'Backup found. Enter the master password from your other device.';
-      form.hidden = false;
-      pw.input.focus();
-    } catch (e) {
-      status.textContent = `That file could not be read: ${e.message} Pick another file.`;
-    }
+  const ready = (list, d) => {
+    candidates = list;
+    dir = d;
+    status.textContent = 'Backup found. Enter the master password from your other device.';
+    form.hidden = false;
+    pw.input.focus();
   };
   root.replaceChildren(gateShell(
     h('h1', { tabindex: '-1' }, 'Bring your vault here'),
@@ -225,13 +240,20 @@ function restoreScreen(root, done) {
     app.folderSupported ? h('button', { class: 'btn wide', type: 'button', onclick: async () => {
       let picked;
       try { picked = await showDirectoryPicker({ id: 'vaulment-sync', mode: 'readwrite' }); } catch { return; }
-      const found = await SyncEngine.newestEnvelope(picked);
-      if (found) await accept(found.bytes, picked);
+      const found = [];
+      for await (const one of SyncEngine.envelopes(picked)) found.push(one);
+      if (found.length > 0) ready(found, picked);
       else status.textContent = 'No readable save file in that folder yet. If your sync app is still downloading, wait and try again.';
     } }, icon('cloud'), 'Choose sync folder') : null,
     h('button', { class: 'btn wide', type: 'button', onclick: async () => {
       const [file] = await pickFile('.gz,application/gzip,application/octet-stream');
-      if (file) await accept(await fileBytes(file));
+      if (!file) return;
+      try {
+        const bytes = await fileBytes(file);
+        ready([{ env: await readEnvelope(bytes), bytes }], null);
+      } catch (e) {
+        status.textContent = `That file could not be read: ${e.message} Pick another file.`;
+      }
     } }, icon('file'), 'Open a backup'),
     status, form,
     h('button', { class: 'btn-link', type: 'button', onclick: () => setupScreen(root, done) }, 'Back'),

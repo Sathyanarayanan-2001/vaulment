@@ -27,6 +27,17 @@ test('recovery key screen will not continue until the box is ticked', async () =
   await ctx.close();
 });
 
+test('closing the tab before confirming the recovery key leaves a warning on Home', async () => {
+  const { ctx, page } = await fresh();
+  await page.goto(b.url);
+  await page.locator('#new-pw').fill(MASTER); await page.locator('#new-pw2').fill(MASTER);
+  await page.getByRole('button', { name: 'Create my vault' }).click();
+  await page.getByRole('heading', { name: 'Save your recovery key' }).waitFor();
+  await page.reload(); await unlock(page);
+  await page.getByText('recovery key was not confirmed').waitFor();
+  await ctx.close();
+});
+
 test('quick start: appears on first visit, steps 1 to 4, then does not return; reopens from Guide', async () => {
   const { ctx, page, problems } = await fresh();
   await newVault(page, b.url);
@@ -149,18 +160,25 @@ test('new recovery key: password gate, new code shown, then back in the app', as
   await page.getByRole('button', { name: 'Make a new recovery key' }).click();
   await page.locator('#dlg-pw').fill(MASTER); await page.getByRole('button', { name: 'Make new key' }).click();
   await page.getByRole('heading', { name: 'Save your recovery key' }).waitFor();
+  await page.keyboard.press('l');
+  await page.waitForTimeout(100);
+  assert.equal(await page.getByRole('heading', { name: 'Save your recovery key' }).count(), 1, 'nothing may lock this screen away');
   await page.getByLabel('I have saved my recovery key').check(); await page.getByRole('button', { name: 'Continue' }).click();
   await page.locator('#sync-chip').waitFor();
   assert.deepEqual(problems, []); await ctx.close();
 });
 
-test('erase this device: two confirmations, then the first-run screen', async () => {
+test('erase this device: confirmations, and a warning that survives reload if changes never left', async () => {
   const { ctx, page, problems } = await fresh();
   await newVault(page, b.url); await skipQuickStart(page);
+  await addItem(page, 'note', 'Never synced note');
+  await page.reload(); await unlock(page);
   await goto(page, '#/settings');
   await page.getByRole('button', { name: 'Erase vault from this device' }).click();
   await page.locator('#dlg-pw').fill(MASTER); await page.locator('dialog').getByRole('button', { name: 'Erase' }).click();
   await page.getByRole('button', { name: 'Erase this device' }).click();
+  await page.getByRole('heading', { name: 'Some changes are not saved elsewhere' }).waitFor();
+  await page.getByRole('button', { name: 'Erase anyway' }).click();
   await page.getByRole('heading', { name: 'Create your vault' }).waitFor();
   assert.deepEqual(problems, []); await ctx.close();
 });

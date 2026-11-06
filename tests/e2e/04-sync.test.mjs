@@ -86,6 +86,65 @@ test('password changed on laptop A: locked laptop B opens with the new one, read
   await A.ctx.close(); await B.ctx.close();
 });
 
+test('new device: a stale newer-named save does not block the real one', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vaulment-sync-'));
+  const A = await laptop(dir);
+  await newVault(A.page, b.url); await skipQuickStart(A.page);
+  await addItem(A.page, 'note', 'Reachable note');
+  await chooseFolder(A.page);
+  await chip(A.page).filter({ hasText: 'Saved' }).waitFor();
+  const [real] = (await readdir(dir)).filter((n) => n.endsWith('.gz'));
+  await writeFile(join(dir, real.replace(/-\d{17}-/, '-20991231235959000-')), await readFile(join(dir, real)));
+  const stale = await laptop(dir);
+  await newVault(stale.page, b.url, 'a different made-up vault 8'); await skipQuickStart(stale.page);
+  await goto(stale.page, '#/sync'); await stale.page.getByRole('button', { name: 'Choose folder' }).click();
+  await chip(stale.page).filter({ hasText: 'Sync problem' }).waitFor();
+  const n = (await readdir(dir)).filter((x) => x.endsWith('.gz') && !x.startsWith(real.slice(0, 22)))[0];
+  await writeFile(join(dir, n.replace(/-\d{17}-/, '-21001231235959000-')), await readFile(join(dir, n)));
+  const C = await laptop(dir);
+  await C.page.goto(b.url);
+  await C.page.getByRole('button', { name: 'Bring my vault to this device' }).click();
+  await C.page.getByRole('button', { name: 'Choose sync folder' }).click();
+  await C.page.locator('#restore-pw').fill(MASTER);
+  await C.page.getByRole('button', { name: 'Open my vault' }).click();
+  await C.page.locator('#sync-chip').waitFor();
+  await goto(C.page, '#/vault'); await C.page.getByRole('link', { name: 'Reachable note' }).waitFor();
+  await A.ctx.close(); await stale.ctx.close(); await C.ctx.close();
+});
+
+test('phone with no folder: a password changed elsewhere is accepted from a backup at the unlock screen', async () => {
+  const ctx = await b.browser.newContext({ acceptDownloads: true });
+  await ctx.addInitScript(() => { delete window.showDirectoryPicker; delete Window.prototype.showDirectoryPicker; });
+  const page = await ctx.newPage(); const problems = watch(page);
+  await newVault(page, b.url); await skipQuickStart(page);
+  await addItem(page, 'note', 'Phone copy');
+  await goto(page, '#/transfer');
+  let dl = page.waitForEvent('download'); await page.locator('#backup-go').click();
+  const first = await (await dl).path();
+  // Laptop stand-in: same vault in a second context, password changed, new backup made.
+  const ctx2 = await b.browser.newContext({ acceptDownloads: true }); const lap = await ctx2.newPage();
+  await lap.goto(b.url);
+  await lap.getByRole('button', { name: 'Bring my vault to this device' }).click();
+  let c = lap.waitForEvent('filechooser'); await lap.getByRole('button', { name: 'Open a backup' }).click(); await (await c).setFiles(first);
+  await lap.locator('#restore-pw').fill(MASTER); await lap.getByRole('button', { name: 'Open my vault' }).click();
+  await lap.locator('#sync-chip').waitFor();
+  await goto(lap, '#/settings');
+  await lap.locator('#cp-old').fill(MASTER); await lap.locator('#cp-new').fill('changed on the laptop 6'); await lap.locator('#cp-new2').fill('changed on the laptop 6');
+  await lap.getByRole('button', { name: 'Change password' }).click();
+  await lap.getByText('Master password changed').waitFor();
+  await goto(lap, '#/transfer');
+  dl = lap.waitForEvent('download'); await lap.locator('#backup-go').click();
+  const second = await (await dl).path();
+  await page.getByRole('button', { name: 'Lock vault' }).click();
+  await page.locator('input[type=password]').fill('changed on the laptop 6');
+  c = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: /Password changed on another device/ }).click();
+  await (await c).setFiles(second);
+  await page.locator('#sync-chip').waitFor();
+  assert.deepEqual(problems, []);
+  await ctx.close(); await ctx2.close();
+});
+
 test('sync state chip: Changes waiting, then Saved about 3 seconds after an edit', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vaulment-sync-'));
   const A = await laptop(dir);

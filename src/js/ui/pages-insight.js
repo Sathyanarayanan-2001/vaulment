@@ -1,5 +1,5 @@
 import { h, icon } from './dom.js';
-import { app } from './state.js';
+import { app, prefs } from './state.js';
 import { barList, chartCard, columns } from './charts.js';
 import { catVar, copySecret, emptyState, expiryBadge, linkButton, mainSecretOf, pageHead } from './common.js';
 import { itemRow, itemTable } from './pages-items.js';
@@ -53,6 +53,7 @@ export function homePage() {
         linkButton('#/add', 'Add item', 'btn btn-primary btn-lg', 'plus'),
         h('form', { class: 'search-wrap', role: 'search', novalidate: true, onsubmit: (e) => { e.preventDefault(); app.searchText = q.value; app.go('#/vault'); } }, icon('search'), q)),
       hits),
+    prefs.get('recoveryPending', false) ? h('p', { class: 'notice' }, icon('warn'), 'Your recovery key was not confirmed as saved. Make a new one in Settings now, or a forgotten password means losing everything.') : null,
     favs.length > 0 ? h('section', { class: 'card' }, h('h2', null, 'Favourites'), h('ul', { class: 'quick' }, favs.slice(0, 8).map((it) => {
       const s = mainSecretOf(it);
       return h('li', { css: { '--cat': catVar(it.c) } }, h('a', { href: `#/item/${it.id}` }, it.title),

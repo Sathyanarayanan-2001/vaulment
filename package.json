@@ -18,7 +18,7 @@
     "verify": "node scripts/verify.mjs"
   },
   "devDependencies": {
-    "axe-core": "4.11.4",
+    "axe-core": "4.14.0",
     "chrome-launcher": "1.2.2",
     "esbuild": "0.28.2",
     "lighthouse": "13.6.0",
